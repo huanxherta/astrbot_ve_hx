@@ -419,10 +419,43 @@ class PlatformParser(Star):
         chain.chain.append(Plain(text=text))
         await event.send(chain)
 
+    def _build_message_text_for_parsing(self, event: AstrMessageEvent) -> str:
+        message_str = (getattr(event, "message_str", "") or "").strip()
+        message = getattr(event, "message", None)
+
+        if not message:
+            return message_str
+
+        for comp in message:
+            comp_type = getattr(comp, "type", None)
+            comp_data = getattr(comp, "data", None)
+            if comp_type not in ("json", "Json") or not hasattr(comp, "data"):
+                continue
+
+            raw = None
+            if isinstance(comp_data, dict):
+                raw = (
+                    comp_data.get("data") or comp_data.get("content") or str(comp_data)
+                )
+            elif comp_data is not None:
+                raw = str(comp_data)
+
+            if not isinstance(raw, str) or ("{" not in raw and "[" not in raw):
+                continue
+
+            try:
+                json_data = json.loads(raw.replace("\\/", "/"))
+                logger.info("检测到 QQ JSON 卡片消息，使用组件 JSON 内容解析")
+                return json.dumps(json_data, ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"解析消息组件 JSON 失败: {e}")
+
+        return message_str
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def auto_parse_video(self, event: AstrMessageEvent):
         """自动检测消息中的视频链接并解析"""
-        message_str = event.message_str.strip()
+        message_str = self._build_message_text_for_parsing(event)
 
         if await self._handle_toggle_command(event, message_str):
             return
