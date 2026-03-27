@@ -9,7 +9,7 @@ import os
 import re
 import tempfile
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, unquote, parse_qs
 
 import aiohttp
 from astrbot.api.event import filter, AstrMessageEvent
@@ -181,6 +181,20 @@ class PlatformParser(Star):
         try:
             parsed = urlparse(candidate)
             netloc = parsed.netloc.lower().removeprefix("www.")
+            
+            # 尝试解析跳转链接 (例如 QQ 的 c.app.qq.com/base/jump?url=...)
+            if parsed.query:
+                qs = parse_qs(parsed.query)
+                for k, v_list in qs.items():
+                    if "url" in k.lower() or "target" in k.lower() or "jump" in k.lower():
+                        inner_url = unquote(v_list[0])
+                        inner_parsed = urlparse(inner_url)
+                        inner_netloc = inner_parsed.netloc.lower().removeprefix("www.")
+                        if inner_parsed.scheme in {"http", "https"} and any(
+                            inner_netloc == d or inner_netloc.endswith("." + d) for d in SUPPORTED_DOMAINS
+                        ):
+                            return inner_url
+
             if parsed.scheme in {"http", "https"} and any(
                 netloc == d or netloc.endswith("." + d) for d in SUPPORTED_DOMAINS
             ):
@@ -426,31 +440,37 @@ class PlatformParser(Star):
         if not message:
             return message_str
 
+        parts = [message_str]
+
         for comp in message:
             comp_type = getattr(comp, "type", None)
-            comp_data = getattr(comp, "data", None)
-            if comp_type not in ("json", "Json") or not hasattr(comp, "data"):
+            if not comp_type:
                 continue
+                
+            comp_type_str = str(comp_type).lower()
+            if comp_type_str in ("json", "app"):
+                raw = None
+                comp_data = getattr(comp, "data", getattr(comp, "content", getattr(comp, "json_data", None)))
+                
+                if isinstance(comp_data, dict):
+                    raw = comp_data.get("data") or comp_data.get("content") or str(comp_data)
+                elif comp_data is not None:
+                    raw = str(comp_data)
+                    
+                if isinstance(raw, str) and ("{" in raw or "[" in raw):
+                    try:
+                        json_data = json.loads(raw.replace("\\/", "/"))
+                        logger.info(f"检测到 {comp_type_str.upper()} 卡片消息，提取内容参与解析")
+                        parts.append(json.dumps(json_data, ensure_ascii=False))
+                    except Exception as e:
+                        logger.warning(f"解析消息组件 JSON 失败: {e}")
+                        parts.append(raw)
+            elif comp_type_str in ("text", "plain"):
+                text_val = getattr(comp, "text", "")
+                if text_val:
+                    parts.append(str(text_val))
 
-            raw = None
-            if isinstance(comp_data, dict):
-                raw = (
-                    comp_data.get("data") or comp_data.get("content") or str(comp_data)
-                )
-            elif comp_data is not None:
-                raw = str(comp_data)
-
-            if not isinstance(raw, str) or ("{" not in raw and "[" not in raw):
-                continue
-
-            try:
-                json_data = json.loads(raw.replace("\\/", "/"))
-                logger.info("检测到 QQ JSON 卡片消息，使用组件 JSON 内容解析")
-                return json.dumps(json_data, ensure_ascii=False)
-            except Exception as e:
-                logger.warning(f"解析消息组件 JSON 失败: {e}")
-
-        return message_str
+        return " ".join(parts)
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def auto_parse_video(self, event: AstrMessageEvent):
