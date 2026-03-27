@@ -1,0 +1,6 @@
+api.log
+downloads/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store

@@ -1,0 +1,31 @@
+{
+  "api_base_url": "http://localhost:10010",
+  "download_timeout": 180,
+  "supported_platforms": {
+    "tiktok": {
+      "enabled": true,
+      "domains": ["tiktok.com"]
+    },
+    "douyin": {
+      "enabled": true,
+      "domains": ["douyin.com", "v.douyin.com", "dy.ixigua.com", "ixigua.com"]
+    },
+    "youtube": {
+      "enabled": true,
+      "domains": ["youtube.com", "youtu.be"],
+      "timeout": 40
+    },
+    "bilibili": {
+      "enabled": true,
+      "domains": ["bilibili.com", "b23.tv"],
+      "headers": {
+        "Referer": "https://www.bilibili.com",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      }
+    }
+  },
+  "cleanup": {
+    "retention_days": 7,
+    "interval_seconds": 86400
+  }
+}

@@ -1,0 +1,13 @@
+name: "astrbot_platform_hx"
+author: "hx"
+desc: "解析部分平台API的插件，支持TikTok、抖音、YouTube、B站等平台"
+version: "1.1.0"
+repo: "https://github.com/huanxherta/astrbot_platform_hx.git"
+entry: "main.py"
+icon: "icon.png"
+supported_platforms:
+  - "all"
+permissions:
+  - "read"
+  - "write"
+  - "network"
