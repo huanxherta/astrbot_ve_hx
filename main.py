@@ -10,7 +10,6 @@ import re
 import tempfile
 from typing import Any
 from urllib.parse import quote, urlparse
-import html  # 新增导入html模块
 
 import aiohttp
 from astrbot.api.event import filter, AstrMessageEvent
@@ -423,18 +422,89 @@ class PlatformParser(Star):
     def _build_message_text_for_parsing(self, event: AstrMessageEvent) -> str:
         message_str = (getattr(event, "message_str", "") or "").strip()
         message = getattr(event, "message", None)
+
         if not message:
             return message_str
+
         for comp in message:
             comp_type = getattr(comp, "type", None)
             comp_data = getattr(comp, "data", None)
-            if comp_type not in ("json", "Json") or not comp_data:
+            if comp_type not in ("json", "Json") or not hasattr(comp, "data"):
                 continue
+
             raw = None
             if isinstance(comp_data, dict):
-                raw = comp_data.get("data") or comp_data.get("content") or str(comp_data)
+                raw = (
+                    comp_data.get("data") or comp_data.get("content") or str(comp_data)
+                )
             elif comp_data is not None:
                 raw = str(comp_data)
+
             if not isinstance(raw, str) or ("{" not in raw and "[" not in raw):
                 continue
-            # ===
+
+            try:
+                json_data = json.loads(raw.replace("\\/", "/"))
+                logger.info("检测到 QQ JSON 卡片消息，使用组件 JSON 内容解析")
+                return json.dumps(json_data, ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"解析消息组件 JSON 失败: {e}")
+
+        return message_str
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def auto_parse_video(self, event: AstrMessageEvent):
+        """自动检测消息中的视频链接并解析"""
+        message_str = self._build_message_text_for_parsing(event)
+
+        if await self._handle_toggle_command(event, message_str):
+            return
+
+        if not self._is_group_parsing_enabled(event):
+            return
+
+        video_urls = self._extract_supported_urls(message_str)
+        if not video_urls:
+            return
+
+        logger.info(
+            f"[auto_parse_video] 检测到 {len(video_urls)} 个视频链接: {video_urls}"
+        )
+        semaphore = asyncio.Semaphore(3)
+        results = await asyncio.gather(
+            *(
+                self._parse_and_download_video(video_url, semaphore)
+                for video_url in video_urls
+            ),
+            return_exceptions=False,
+        )
+
+        for result in results:
+            temp_path = result.get("temp_path")
+            if temp_path:
+                try:
+                    chain = MessageChain()
+                    chain.chain.append(
+                        Plain(text=f"📹 {result.get('title', 'Unknown Video')}")
+                    )
+                    chain.chain.append(Video.fromFileSystem(temp_path))
+                    await event.send(chain)
+                except Exception as e:
+                    logger.warning(f"发送视频失败: {result.get('url')}, {e}")
+                    await self._send_plain_text(
+                        event,
+                        f"📹 {result.get('title', 'Unknown Video')}\n\n⚠️ 视频发送失败\n链接: {result.get('url')}",
+                    )
+                finally:
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
+            else:
+                await self._send_plain_text(event, result.get("error", "❌ 未知错误"))
+        return
+
+    async def terminate(self):
+        """插件销毁方法"""
+        logger.info("PlatformParser 插件已停止")
