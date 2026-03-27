@@ -39,6 +39,7 @@ def load_config() -> dict:
 
 CONFIG = load_config()
 API_BASE_URL = CONFIG.get("api_base_url", "http://localhost:10010")
+MAX_VIDEO_DURATION_SECONDS = 30 * 60
 
 
 class VideoItem(BaseModel):
@@ -217,6 +218,19 @@ def _normalize_error_detail(err: Exception, url: str) -> HTTPException:
     return HTTPException(status_code=500, detail=detail)
 
 
+def _ensure_duration_allowed(duration: Any, url: str, title: str = "视频"):
+    if isinstance(duration, (int, float)) and duration > MAX_VIDEO_DURATION_SECONDS:
+        minutes = round(float(duration) / 60, 1)
+        logger.warning(f"视频时长超限，拒绝处理: {url}, duration={duration}")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"视频时长超过限制：{minutes} 分钟。"
+                f"当前仅支持下载 30 分钟以内的视频：{title}"
+            ),
+        )
+
+
 @app.post("/parse")
 async def parse_video(item: VideoItem):
     url = item.url
@@ -250,6 +264,7 @@ async def parse_video(item: VideoItem):
 
             info = cast(dict[str, Any], raw_info)
             title = info.get("title", "Unknown Video")
+            _ensure_duration_allowed(info.get("duration"), url, title)
             real_url = None
 
             # 从formats中查找最佳链接
@@ -288,9 +303,7 @@ async def parse_video(item: VideoItem):
                 if "twitter.com" in url or "x.com" in url
                 else "Unknown"
             )
-            download_api_url = (
-                f"{API_BASE_URL}/download?url={quote(url, safe='')}"
-            )
+            download_api_url = f"{API_BASE_URL}/download?url={quote(url, safe='')}"
             logger.info(f"✅ 解析成功: {title}")
 
             return {
@@ -349,6 +362,16 @@ async def download_video(url: str):
         )
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                raise HTTPException(
+                    status_code=400, detail="下载失败：无法获取视频信息"
+                )
+
+            _ensure_duration_allowed(
+                info.get("duration"), url, info.get("title", "视频")
+            )
+
             info = ydl.extract_info(url, download=True)
             if not info:
                 raise HTTPException(
