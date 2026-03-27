@@ -16,6 +16,11 @@ from datetime import timedelta
 from typing import Dict, Any as AnyT
 import httpx
 
+# 确保 deno 在 PATH 中（YouTube n parameter 反爬需要）
+_deno_bin = os.path.expanduser("~/.deno/bin")
+if _deno_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _deno_bin + os.pathsep + os.environ.get("PATH", "")
+
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -167,6 +172,8 @@ def _build_ydl_opts(url: str) -> dict[str, Any]:
             logger.warning("⚠️ 未找到Cookie文件，匿名解析")
         # YouTube不强制mp4，让yt-dlp自动选择最佳可用格式
         ydl_opts.pop("format", None)
+        # 启用远程组件下载（解YouTube n parameter反爬需要最新版challenge solver）
+        ydl_opts["remote_components"] = ["ejs:github"]
     elif "bilibili.com" in url or "b23.tv" in url:
         logger.info("📺 检测到B站链接")
         # 从配置文件中获取B站配置
@@ -182,6 +189,15 @@ def _build_ydl_opts(url: str) -> dict[str, Any]:
             ydl_opts["http_headers"] = headers
         # B站不指定具体格式，让yt-dlp自动选择最佳可用格式
         ydl_opts.pop("format", None)
+        # 加载B站Cookie（解决412反爬）
+        bilibili_cookie_path = os.path.join(
+            os.path.dirname(__file__), "bilibili_cookies.txt"
+        )
+        if os.path.exists(bilibili_cookie_path):
+            ydl_opts["cookiefile"] = bilibili_cookie_path
+            logger.info(f"🍪 加载B站Cookie: {bilibili_cookie_path}")
+        else:
+            logger.warning("⚠️ 未找到B站Cookie文件，可能被反爬拦截")
     else:
         logger.info("🌐 其他平台链接")
 
