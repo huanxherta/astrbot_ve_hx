@@ -1,3 +1,4 @@
+#服务器带宽太小，懒得搞了
 # AstrBot 视频解析插件（Platform Parser）
 
 这是一个针对 **AstrBot** 的视频解析插件，包含两个部分：
